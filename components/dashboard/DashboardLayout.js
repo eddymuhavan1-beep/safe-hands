@@ -59,10 +59,11 @@ export default function DashboardLayout({ children, title, breadcrumbs }) {
     },
     {
       name: 'Marketplace',
+      description: 'Browse escrow-protected listings',
       href: '/dashboard/marketplace',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l-1.5 7.5L16 21l-4-2-4 2-1.5-7.5z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
         </svg>
       ),
       roles: ['admin', 'buyer', 'seller', 'buyer_seller']
@@ -98,6 +99,26 @@ export default function DashboardLayout({ children, title, breadcrumbs }) {
         </svg>
       ),
       roles: ['admin', 'buyer', 'seller', 'buyer_seller']
+    },
+    {
+      name: 'Payments & refunds',
+      href: '/dashboard/buyer/payments',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+        </svg>
+      ),
+      roles: ['buyer', 'buyer_seller']
+    },
+    {
+      name: 'Earnings & balance',
+      href: '/dashboard/seller/wallet',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+      roles: ['seller', 'buyer_seller']
     },
     {
       name: 'Profile',
@@ -171,7 +192,14 @@ export default function DashboardLayout({ children, title, breadcrumbs }) {
                 <span className="group-hover:text-primary transition-colors duration-200">
                   {item.icon}
                 </span>
-                {item.name}
+                <span className="flex flex-col">
+                  <span>{item.name}</span>
+                  {item.description && (
+                    <span className="text-xs font-normal text-muted-foreground group-hover:text-muted-foreground">
+                      {item.description}
+                    </span>
+                  )}
+                </span>
               </Link>
             ))}
           </nav>

@@ -5,6 +5,7 @@ import {
   MAX_FILES_DISPUTE_CREATE,
 } from '@/lib/evidenceUpload';
 import { validateDisputeDescription, createDisputeWithRpcOrFallback } from '@/lib/disputeCreate';
+import { computeDisputeRouting, applyDisputeRouting } from '@/lib/disputeRouting';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -174,6 +175,15 @@ export async function POST(request) {
       );
     }
 
+    const routing = await computeDisputeRouting(supabase, {
+      reason,
+      amount: transaction.amount,
+      screening,
+      transaction_id,
+      evidenceCount: uploadedEvidenceUrls.length,
+    });
+    await applyDisputeRouting(supabase, disputeId, routing);
+
     const { data: dispute, error: fetchDisputeErr } = await supabase
       .from('disputes')
       .select('*')
@@ -226,10 +236,13 @@ export async function POST(request) {
         success: true,
         dispute,
         submission_screening: screening,
+        routing,
         message:
           screening === 'held'
             ? 'Dispute created. It was placed in the admin triage queue because the filing had minimal evidence; an admin will still review it.'
-            : 'Dispute created successfully',
+            : routing.recommended_resolution
+              ? 'Dispute created. The system suggested an outcome for admin review — no automatic payout.'
+              : 'Dispute created successfully',
       },
       { status: 201 }
     );
@@ -251,6 +264,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const screening = searchParams.get('screening');
+    const queue = searchParams.get('queue');
 
     const { data: userData } = await supabase.from('users').select('role').eq('id', user.id).single();
 
@@ -284,6 +298,9 @@ export async function GET(request) {
     let list = disputes || [];
     if (userData?.role === 'admin' && screening && screening !== 'all') {
       list = list.filter((d) => (d.submission_screening || 'cleared') === screening);
+    }
+    if (userData?.role === 'admin' && queue && queue !== 'all') {
+      list = list.filter((d) => (d.dispute_queue || 'standard') === queue);
     }
 
     return Response.json({

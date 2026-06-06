@@ -7,12 +7,13 @@ import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 import { validateDisputeDescription, MIN_DESCRIPTION_LEN } from '@/lib/disputeCreate';
+import EvidenceUploadPanel from '@/components/evidence/EvidenceUploadPanel';
 
 export default function TransactionDetail() {
   const router = useRouter();
   const params = useParams();
   const { id } = params;
-  const { user: authUser, loading: authLoading } = useAuth();
+  const { user: authUser, profile, loading: authLoading } = useAuth();
   
   const [user, setUser] = useState(null);
   const [transaction, setTransaction] = useState(null);
@@ -46,11 +47,12 @@ export default function TransactionDetail() {
   const [confirmDeliveryFiles, setConfirmDeliveryFiles] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastManualRefreshAt, setLastManualRefreshAt] = useState(null);
+  const [buyerRefund, setBuyerRefund] = useState(null);
 
   const mpesaPollLastStatus = useRef('');
 
   /** @returns {Promise<{ ok: boolean, reason?: string }>} */
-  const fetchTransaction = useCallback(async (userId) => {
+  const fetchTransaction = useCallback(async (userId, isAdminUser = false) => {
     try {
       const { data: txn, error } = await supabase
         .from('transactions')
@@ -64,7 +66,7 @@ export default function TransactionDetail() {
 
       if (error) throw error;
 
-      if (txn.buyer_id !== userId && txn.seller_id !== userId) {
+      if (txn.buyer_id !== userId && txn.seller_id !== userId && !isAdminUser) {
         setError('Unauthorized');
         return { ok: false, reason: 'unauthorized' };
       }
@@ -128,8 +130,9 @@ export default function TransactionDetail() {
     }
 
     setUser(authUser);
-    fetchTransaction(authUser.id);
-  }, [id, router, authUser, authLoading, fetchTransaction]);
+    const isAdminUser = profile?.role === 'admin';
+    fetchTransaction(authUser.id, isAdminUser);
+  }, [id, router, authUser, authLoading, fetchTransaction, profile?.role]);
 
   useEffect(() => {
     if (!transaction || typeof window === 'undefined') return;
@@ -192,6 +195,35 @@ export default function TransactionDetail() {
       clearInterval(iv);
     };
   }, [id, user?.id, transaction?.status, fetchTransaction]);
+
+  useEffect(() => {
+    if (!transaction?.id || !user?.id || transaction.buyer_id !== user.id) {
+      setBuyerRefund(null);
+      return;
+    }
+    if (transaction.status !== 'refunded') {
+      setBuyerRefund(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('refund_requests')
+        .select('id, amount, phone, status, simulated, mpesa_transaction_id, completed_at, created_at')
+        .eq('transaction_id', transaction.id)
+        .eq('buyer_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!cancelled && !error && data) setBuyerRefund(data);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [transaction?.id, transaction?.status, transaction?.buyer_id, user?.id]);
 
   useEffect(() => {
     if (!id || transaction?.status !== 'payment_pending' || !user?.id) return;
@@ -556,6 +588,7 @@ export default function TransactionDetail() {
 
   const isBuyer = user && transaction && transaction.buyer_id === user.id;
   const isSeller = user && transaction && transaction.seller_id === user.id;
+  const isAdminView = profile?.role === 'admin' && user && transaction && !isBuyer && !isSeller;
   const canRaiseDispute =
     transaction &&
     transaction.status !== 'disputed' &&
@@ -634,6 +667,21 @@ export default function TransactionDetail() {
             </span>
           </div>
         </div>
+
+        {isAdminView && (
+          <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+            <p className="font-semibold text-base">Admin audit view (read-only)</p>
+            <p className="text-sm mt-1">
+              You are reviewing this transaction as an administrator. Payment and shipping actions are hidden.
+            </p>
+            <Link
+              href={`/dashboard/admin/transactions/${transaction.id}`}
+              className="inline-block mt-2 text-sm font-semibold text-amber-900 underline"
+            >
+              Open full audit record →
+            </Link>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-4 mb-5">
           <div>
@@ -756,7 +804,7 @@ export default function TransactionDetail() {
           </div>
           <div>
             <p className="text-sm text-gray-600">M-Pesa Reference</p>
-            <p className="text-gray-900 font-mono">{transaction.mpesa_ref || 'N/A'}</p>
+            <p className="text-gray-900 font-mono">{transaction.mpesa_receipt_number || transaction.mpesa_ref || 'N/A'}</p>
           </div>
           <div>
             <p className="text-sm text-gray-600">Payment Confirmed</p>
@@ -768,6 +816,47 @@ export default function TransactionDetail() {
           </div>
         </div>
       </div>
+
+      {isBuyer && transaction.status === 'refunded' && (
+        <div className="mb-6 rounded-2xl border border-emerald-300 bg-gradient-to-br from-emerald-50 to-teal-50 p-6 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-bold uppercase tracking-wide text-emerald-800">Refund received</p>
+              <p className="mt-2 text-lg font-semibold text-emerald-950">
+                KES {Number(transaction.amount).toLocaleString()} was returned to your M-Pesa
+                {buyerRefund?.phone ? ` (${buyerRefund.phone})` : ''}.
+              </p>
+              {buyerRefund?.mpesa_transaction_id && (
+                <p className="mt-2 text-sm text-emerald-900">
+                  Receipt:{' '}
+                  <span className="font-mono font-semibold">{buyerRefund.mpesa_transaction_id}</span>
+                  {buyerRefund.simulated ? ' · demo simulation' : ''}
+                </p>
+              )}
+              {buyerRefund?.completed_at && (
+                <p className="mt-1 text-xs text-emerald-800/80">
+                  {new Date(buyerRefund.completed_at).toLocaleString()}
+                </p>
+              )}
+              {!buyerRefund && (
+                <p className="mt-2 text-sm text-emerald-900/80">
+                  Refund details will appear once processing completes. Check Payments & refunds for the full receipt.
+                </p>
+              )}
+            </div>
+            <Link
+              href={
+                buyerRefund?.id
+                  ? `/dashboard/buyer/payments?highlight=${buyerRefund.id}&tab=refunds`
+                  : '/dashboard/buyer/payments?tab=refunds'
+              }
+              className="inline-flex shrink-0 items-center justify-center rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-emerald-800"
+            >
+              View in Payments →
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Delivery Information */}
       {(transaction.status === 'delivered' || transaction.status === 'released') && (
@@ -1069,7 +1158,7 @@ export default function TransactionDetail() {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6 max-w-md w-full">
             <h3 className="text-xl font-bold text-slate-900 mb-4">Submit Shipping Evidence</h3>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-base font-semibold text-gray-800 mb-2">
                 Tracking Number *
               </label>
               <input
@@ -1081,7 +1170,7 @@ export default function TransactionDetail() {
               />
             </div>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-base font-semibold text-gray-800 mb-2">
                 Courier *
               </label>
               <input
@@ -1093,7 +1182,7 @@ export default function TransactionDetail() {
               />
             </div>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-base font-semibold text-gray-800 mb-2">
                 Shipping Notes (optional)
               </label>
               <textarea
@@ -1105,27 +1194,14 @@ export default function TransactionDetail() {
               />
             </div>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Dispatch photos * (1–5, JPEG/PNG/WebP, max 5MB each)
-              </label>
-              <p className="text-xs text-slate-600 mb-2">
-                Required together with tracking: e.g. packaged item, courier slip, or label on the parcel.
-              </p>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                multiple
-                onChange={(e) => {
-                  const files = e.target.files ? Array.from(e.target.files) : [];
-                  setShippingFiles(files.slice(0, 5));
-                }}
-                className="w-full"
+              <EvidenceUploadPanel
+                id="ship-evidence"
+                files={shippingFiles}
+                onChange={setShippingFiles}
+                maxFiles={5}
+                label="Dispatch photos *"
+                helpText="Required with tracking: packaged item, courier slip, or label on the parcel. 1–5 images, JPEG/PNG/WebP, max 5MB each."
               />
-              {shippingFiles.length > 0 && (
-                <p className="text-xs text-gray-500 mt-2">
-                  Selected: {shippingFiles.length} file{shippingFiles.length === 1 ? '' : 's'}
-                </p>
-              )}
             </div>
             <div className="flex gap-2">
               <button
@@ -1159,8 +1235,9 @@ export default function TransactionDetail() {
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-slate-900 mb-2">Confirm Delivery</h3>
-            <p className="text-slate-600 mb-4">
-              Confirming delivery will release the funds to the seller. This action cannot be undone.
+            <p className="text-base text-slate-700 leading-relaxed mb-4">
+              Confirming delivery releases escrow funds to the seller. Upload clear photos of what you received — this
+              protects you if a dispute is opened later.
             </p>
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1202,27 +1279,14 @@ export default function TransactionDetail() {
               />
             </div>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Delivery photos * (1–5, JPEG/PNG/WebP, max 5MB each)
-              </label>
-              <p className="text-xs text-slate-600 mb-2">
-                Upload clear photos of what you received before funds are released to the seller.
-              </p>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                multiple
-                onChange={(e) => {
-                  const files = e.target.files ? Array.from(e.target.files) : [];
-                  setConfirmDeliveryFiles(files.slice(0, 5));
-                }}
-                className="w-full"
+              <EvidenceUploadPanel
+                id="confirm-delivery-evidence"
+                files={confirmDeliveryFiles}
+                onChange={setConfirmDeliveryFiles}
+                maxFiles={5}
+                label="Delivery photos *"
+                helpText="Show the item you received and packaging. 1–5 images required before funds release."
               />
-              {confirmDeliveryFiles.length > 0 && (
-                <p className="text-xs text-gray-500 mt-2">
-                  Selected: {confirmDeliveryFiles.length} file{confirmDeliveryFiles.length === 1 ? '' : 's'}
-                </p>
-              )}
             </div>
             <div className="flex gap-2">
               <button
@@ -1321,24 +1385,14 @@ export default function TransactionDetail() {
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Evidence images * (1–3, JPEG/PNG/WebP, max 5MB each)
-              </label>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                multiple
-                onChange={(e) => {
-                  const files = e.target.files ? Array.from(e.target.files) : [];
-                  setDisputeFiles(files.slice(0, 3));
-                }}
-                className="w-full"
+              <EvidenceUploadPanel
+                id="dispute-evidence"
+                files={disputeFiles}
+                onChange={setDisputeFiles}
+                maxFiles={3}
+                label="Dispute evidence *"
+                helpText="Attach 1–3 photos supporting your claim. Admins review these with the full transaction timeline."
               />
-              {disputeFiles.length > 0 && (
-                <p className="text-xs text-gray-500 mt-2">
-                  Selected: {disputeFiles.length} file{disputeFiles.length === 1 ? '' : 's'}
-                </p>
-              )}
             </div>
 
             <div className="mb-4">

@@ -6,6 +6,9 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
+import EvidenceUploadPanel from '@/components/evidence/EvidenceUploadPanel';
+import DisputeOutcomeCard from '@/components/disputes/DisputeOutcomeCard';
+import { getResolutionVerdictLabel } from '@/lib/disputeResolutionLabels';
 
 export default function DisputeDetail() {
   const router = useRouter();
@@ -25,6 +28,8 @@ export default function DisputeDetail() {
   const [adminNotes, setAdminNotes] = useState('');
   const [userRole, setUserRole] = useState(null);
   const [evidenceTimeline, setEvidenceTimeline] = useState([]);
+  const [refundRequest, setRefundRequest] = useState(null);
+  const [resolverName, setResolverName] = useState(null);
 
   useEffect(() => {
     if (!id || authLoading) return;
@@ -66,6 +71,24 @@ export default function DisputeDetail() {
             }
           }
         }
+
+        if (disputeData?.resolved_by) {
+          const { data: resolver } = await supabase
+            .from('users')
+            .select('full_name, email')
+            .eq('id', disputeData.resolved_by)
+            .maybeSingle();
+          setResolverName(resolver?.full_name || resolver?.email || 'Admin');
+        }
+
+        const { data: refund } = await supabase
+          .from('refund_requests')
+          .select('*')
+          .eq('dispute_id', disputeData.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        setRefundRequest(refund || null);
       } else {
         setError('Dispute not found');
       }
@@ -184,6 +207,18 @@ export default function DisputeDetail() {
         <h1 className="text-3xl font-bold mt-2">Dispute Details</h1>
       </div>
 
+      {(dispute.status === 'resolved' || dispute.status === 'closed') && (
+        <div className="mb-6">
+          <DisputeOutcomeCard
+            dispute={dispute}
+            transaction={dispute.transaction}
+            resolverName={resolverName}
+            refundRequest={refundRequest}
+            demoMode={Boolean(refundRequest?.simulated)}
+          />
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6">
         <div className="flex justify-between items-start mb-4">
           <div>
@@ -212,6 +247,18 @@ export default function DisputeDetail() {
           <p className="text-sm text-gray-600">Transaction Amount</p>
           <p className="text-2xl font-bold">KES {dispute.transaction?.amount?.toLocaleString() || 'N/A'}</p>
         </div>
+
+        {dispute.recommended_resolution && dispute.status === 'open' && (
+          <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <p className="text-sm font-semibold text-indigo-900">System suggestion (admin confirms)</p>
+            <p className="text-base text-indigo-950 mt-1">
+              {getResolutionVerdictLabel(dispute.recommended_resolution)}
+            </p>
+            {dispute.recommended_reason && (
+              <p className="text-sm text-indigo-800 mt-2">{dispute.recommended_reason}</p>
+            )}
+          </div>
+        )}
 
         <div className="mb-4">
           <p className="text-sm text-gray-600">Reason</p>
@@ -298,7 +345,7 @@ export default function DisputeDetail() {
           )}
         </div>
 
-        {dispute.resolution && (
+        {dispute.resolution && dispute.status !== 'resolved' && dispute.status !== 'closed' && (
           <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
             <p className="text-sm text-gray-600">Resolution</p>
             <p className="font-medium text-green-800 capitalize">{dispute.resolution.replace('_', ' ')}</p>
@@ -345,14 +392,15 @@ export default function DisputeDetail() {
               Max 3 files, max 5MB each. JPEG, PNG, or WebP only.
             </p>
             <form onSubmit={handleEvidenceUpload}>
-              <input
-                type="file"
-                multiple
-                accept="image/jpeg,image/png,image/webp"
-                onChange={(e) => setSelectedFiles(Array.from(e.target.files))}
-                className="w-full mb-4"
+              <EvidenceUploadPanel
+                id="dispute-append-evidence"
+                files={selectedFiles}
+                onChange={setSelectedFiles}
+                maxFiles={3}
+                label="Additional evidence"
+                helpText="Max 3 files, 5MB each. JPEG, PNG, or WebP only."
               />
-              <div className="flex gap-2">
+              <div className="flex gap-2 mt-4">
                 <button
                   type="submit"
                   disabled={uploading || selectedFiles.length === 0}

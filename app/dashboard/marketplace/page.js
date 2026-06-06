@@ -81,9 +81,19 @@ export default function Marketplace() {
 
   return (
     <>
-      <div className="mb-10">
-        <h1 className="text-3xl font-bold text-gray-900">Safe Hands Marketplace</h1>
-        <p className="text-gray-600 mt-1">Browse verified listings from trusted sellers across Kenya</p>
+      <div className="mb-10 rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-6">
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="rounded-xl bg-blue-600 text-white p-3 text-2xl" aria-hidden>
+            🛍️
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Marketplace</h1>
+            <p className="text-base text-gray-700 mt-2 max-w-2xl leading-relaxed">
+              Discover items from verified sellers. Every purchase can use Safe Hands escrow — pay securely, confirm
+              delivery, then funds release to the seller.
+            </p>
+          </div>
+        </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl shadow-sm mb-8 p-6">

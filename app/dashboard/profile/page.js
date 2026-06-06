@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { validateField, validatePhone, normalizePhone } from '@/lib/validation';
 import { useAuth } from '@/context/AuthContext';
 
@@ -15,6 +16,7 @@ export default function ProfilePage() {
   const [errors, setErrors] = useState({});
   const [successMessage, setSuccessMessage] = useState('');
   const [messageTimeout, setMessageTimeout] = useState(null);
+  const [buyerMoneySummary, setBuyerMoneySummary] = useState(null);
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -83,6 +85,20 @@ export default function ProfilePage() {
           bio: result.data.bio || '',
           profile_picture_url: result.data.profile_picture_url || '',
         });
+
+        if (['buyer', 'buyer_seller'].includes(result.data.role)) {
+          try {
+            const payRes = await fetch('/api/buyer/payments', {
+              headers: { Authorization: `Bearer ${session.access_token}` },
+            });
+            if (payRes.ok) {
+              const payBody = await payRes.json();
+              if (payBody.summary) setBuyerMoneySummary(payBody.summary);
+            }
+          } catch (payErr) {
+            console.error('Error fetching buyer payment summary:', payErr);
+          }
+        }
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -367,11 +383,49 @@ export default function ProfilePage() {
               </div>
 
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Balance</span>
-                <span className="font-semibold text-gray-900">
-                  KES {profile?.account_balance?.toFixed(2) || '0.00'}
-                </span>
+                {profile?.role === 'seller' || profile?.role === 'buyer_seller' ? (
+                  <>
+                    <span className="text-sm text-gray-600">Seller wallet</span>
+                    <Link
+                      href="/dashboard/seller/wallet"
+                      className="font-semibold text-emerald-700 hover:text-emerald-800 text-sm"
+                    >
+                      Earnings & balance →
+                    </Link>
+                  </>
+                ) : profile?.role === 'buyer' ? (
+                  <>
+                    <span className="text-sm text-gray-600">Refunded (M-Pesa)</span>
+                    <span className="font-semibold text-gray-900">
+                      KES {(buyerMoneySummary?.total_refunded ?? 0).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm text-gray-600">Balance</span>
+                    <span className="font-semibold text-gray-900">
+                      KES {profile?.account_balance?.toFixed(2) || '0.00'}
+                    </span>
+                  </>
+                )}
               </div>
+
+              {(['buyer', 'buyer_seller'].includes(profile?.role)) && (
+                <div className="pt-2 border-t border-gray-100">
+                  <Link
+                    href="/dashboard/buyer/payments"
+                    className="text-sm font-semibold text-indigo-600 hover:text-indigo-800"
+                  >
+                    Payments & refunds →
+                  </Link>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Buyer funds are not stored in-app — refunds go to your M-Pesa.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

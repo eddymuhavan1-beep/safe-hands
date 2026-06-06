@@ -17,7 +17,11 @@ export default function BuyerDashboard() {
     active: 0,
     completed: 0,
     disputed: 0,
+    refunded: 0,
+    totalRefunded: 0,
+    inEscrow: 0,
   });
+  const [recentRefunds, setRecentRefunds] = useState([]);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [loadingStage, setLoadingStage] = useState('initial');
@@ -49,6 +53,25 @@ export default function BuyerDashboard() {
           setTransactions(data);
           calculateStats(data);
         }
+
+        const { data: { session } } = await supabase.auth.getSession();
+        const payRes = await fetch('/api/buyer/payments', {
+          headers: { Authorization: `Bearer ${session?.access_token || ''}` },
+        });
+        if (payRes.ok) {
+          const payBody = await payRes.json();
+          if (payBody.summary) {
+            setStats((prev) => ({
+              ...prev,
+              refunded: payBody.summary.refunded_transaction_count ?? 0,
+              totalRefunded: payBody.summary.total_refunded ?? 0,
+              inEscrow: payBody.summary.in_escrow ?? 0,
+            }));
+          }
+          if (Array.isArray(payBody.refunds)) {
+            setRecentRefunds(payBody.refunds.slice(0, 3));
+          }
+        }
       } catch (error) {
         console.error('Error fetching transactions:', error);
       } finally {
@@ -66,8 +89,11 @@ export default function BuyerDashboard() {
       active: transactionData.filter(t => ['initiated', 'pending_seller_approval', 'seller_approved', 'seller_change_requested', 'payment_pending', 'escrow', 'delivered'].includes(t.status)).length,
       completed: transactionData.filter(t => t.status === 'released').length,
       disputed: transactionData.filter(t => t.disputes && t.disputes.length > 0).length,
+      refunded: transactionData.filter(t => t.status === 'refunded').length,
+      totalRefunded: 0,
+      inEscrow: 0,
     };
-    setStats(newStats);
+    setStats((prev) => ({ ...prev, ...newStats }));
   };
 
   const filteredTransactions = transactions.filter(transaction => {
@@ -272,7 +298,7 @@ export default function BuyerDashboard() {
       </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-5">
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 p-6">
             <div className="flex items-center justify-between">
               <div>
@@ -304,12 +330,31 @@ export default function BuyerDashboard() {
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Completed</p>
+                <p className="text-sm font-medium text-gray-600">Released to seller</p>
                 <p className="text-3xl font-bold text-gray-900 mt-2">{stats.completed}</p>
               </div>
               <div className="w-14 h-14 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
                 <svg className="w-7 h-7 text-green-600" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Refunded to you</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">{stats.refunded}</p>
+                {stats.totalRefunded > 0 && (
+                  <p className="text-xs text-emerald-700 font-medium mt-1">
+                    {formatAmount(stats.totalRefunded)} via M-Pesa
+                  </p>
+                )}
+              </div>
+              <div className="w-14 h-14 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <svg className="w-7 h-7 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
                 </svg>
               </div>
             </div>
@@ -331,7 +376,7 @@ export default function BuyerDashboard() {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <Link href="/dashboard/transactions/create" className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md hover:border-blue-300 transition-all duration-200 p-6 group">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-600 transition-colors duration-200">
@@ -359,7 +404,64 @@ export default function BuyerDashboard() {
               </div>
             </div>
           </Link>
+
+          <Link href="/dashboard/buyer/payments" className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md hover:border-emerald-300 transition-all duration-200 p-6 group">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-emerald-100 rounded-lg flex items-center justify-center group-hover:bg-emerald-600 transition-colors duration-200">
+                <svg className="w-7 h-7 text-emerald-600 group-hover:text-white transition-colors duration-200" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 group-hover:text-emerald-600 transition-colors duration-200">Payments & refunds</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  {stats.inEscrow > 0
+                    ? `${formatAmount(stats.inEscrow)} in escrow · view history`
+                    : 'M-Pesa pay-ins and dispute refunds'}
+                </p>
+              </div>
+            </div>
+          </Link>
         </div>
+
+        {recentRefunds.length > 0 && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-6 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-emerald-950">Recent refunds</h2>
+                <p className="text-sm text-emerald-900/80">Dispute refunds sent back to your M-Pesa.</p>
+              </div>
+              <Link
+                href="/dashboard/buyer/payments?tab=refunds"
+                className="text-sm font-semibold text-emerald-800 hover:text-emerald-950"
+              >
+                View all →
+              </Link>
+            </div>
+            <ul className="mt-4 space-y-3">
+              {recentRefunds.map((r) => (
+                <li
+                  key={r.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200/80 bg-white px-4 py-3"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-900">{formatAmount(r.amount)} → {r.phone}</p>
+                    <p className="text-xs text-slate-500">
+                      {r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.created_at).toLocaleString()}
+                      {r.mpesa_transaction_id ? ` · ${r.mpesa_transaction_id}` : ''}
+                    </p>
+                  </div>
+                  <Link
+                    href={`/dashboard/buyer/payments?highlight=${r.id}&tab=refunds`}
+                    className="text-sm font-semibold text-indigo-600 hover:text-indigo-800"
+                  >
+                    Receipt →
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Transactions Table */}
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -381,7 +483,8 @@ export default function BuyerDashboard() {
                   <option value="payment_pending">Payment Pending</option>
                   <option value="escrow">In Escrow</option>
                   <option value="delivered">Delivered</option>
-                  <option value="released">Completed</option>
+                  <option value="released">Released to seller</option>
+                  <option value="refunded">Refunded</option>
                   <option value="disputed">Disputed</option>
                 </select>
               </div>
@@ -466,6 +569,14 @@ export default function BuyerDashboard() {
                           >
                             View Details →
                           </Link>
+                          {transaction.status === 'refunded' && (
+                            <Link
+                              href="/dashboard/buyer/payments?tab=refunds"
+                              className="text-emerald-600 hover:text-emerald-700 font-semibold text-sm transition-colors duration-150"
+                            >
+                              View refund →
+                            </Link>
+                          )}
                           {(transaction.status === 'escrow' ||
                             transaction.status === 'delivered') && (
                             <Link

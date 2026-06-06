@@ -39,8 +39,9 @@ export default function Sidebar() {
       },
       {
         name: 'Marketplace',
+        description: 'Browse listings',
         href: '/dashboard/marketplace',
-        icon: '🛒',
+        icon: '🛍️',
       },
     ];
 
@@ -77,6 +78,11 @@ export default function Sidebar() {
                 href: '/dashboard/buyer',
                 icon: '🛍️',
               },
+              {
+                name: 'Payments & refunds',
+                href: '/dashboard/buyer/payments',
+                icon: '💳',
+              },
             ]
           : [];
       return [
@@ -107,6 +113,11 @@ export default function Sidebar() {
       // Buyer
       return [
         ...baseItems,
+        {
+          name: 'Payments & refunds',
+          href: '/dashboard/buyer/payments',
+          icon: '💳',
+        },
         {
           name: 'Disputes',
           href: '/dashboard/disputes',
@@ -161,7 +172,12 @@ export default function Sidebar() {
               onClick={() => isMobile && setIsOpen(false)}
             >
               <span className="text-lg">{item.icon}</span>
-              <span className="text-sm">{item.name}</span>
+              <span className="flex flex-col">
+                <span className="text-sm font-medium">{item.name}</span>
+                {item.description && (
+                  <span className="text-xs text-gray-500">{item.description}</span>
+                )}
+              </span>
             </Link>
           ))}
         </nav>

@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
+import DisputeOutcomeCard from '@/components/disputes/DisputeOutcomeCard';
+import { getResolutionVerdictLabel, getDisputeQueueLabel } from '@/lib/disputeResolutionLabels';
 
 const statusColors = {
   open: 'bg-blue-100 text-blue-700',
@@ -22,7 +24,9 @@ export default function AdminDisputesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
-  const [queueFilter, setQueueFilter] = useState('cleared');
+  const [queueFilter, setQueueFilter] = useState('all');
+  const [routeQueueFilter, setRouteQueueFilter] = useState('all');
+  const [viewOutcomeDispute, setViewOutcomeDispute] = useState(null);
   const [selectedDispute, setSelectedDispute] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [modalEvidence, setModalEvidence] = useState([]);
@@ -110,10 +114,32 @@ export default function AdminDisputesPage() {
 
   const filteredDisputes = disputes.filter((dispute) => {
     if (filterStatus !== 'all' && dispute.status !== filterStatus) return false;
-    if (queueFilter === 'all') return true;
-    const screening = dispute.submission_screening || 'cleared';
-    return screening === queueFilter;
+    if (queueFilter !== 'all') {
+      const screening = dispute.submission_screening || 'cleared';
+      if (screening !== queueFilter) return false;
+    }
+    if (routeQueueFilter !== 'all') {
+      const rq = dispute.dispute_queue || 'standard';
+      if (rq !== routeQueueFilter) return false;
+    }
+    return true;
   });
+
+  const resolutionToDecision = (resolution) => {
+    if (resolution === 'refund_buyer') return 'buyer_wins';
+    if (resolution === 'release_to_seller') return 'seller_wins';
+    if (resolution === 'partial_refund') return 'split';
+    return '';
+  };
+
+  const applySuggestedDecision = () => {
+    if (!selectedDispute?.recommended_resolution) return;
+    const d = resolutionToDecision(selectedDispute.recommended_resolution);
+    if (d) setDecision(d);
+    if (selectedDispute.recommended_reason && !notes.trim()) {
+      setNotes(`Applied system suggestion: ${selectedDispute.recommended_reason}`);
+    }
+  };
 
   const openModal = (dispute) => {
     setSelectedDispute(dispute);
@@ -135,6 +161,10 @@ export default function AdminDisputesPage() {
   const handleResolveDispute = async () => {
     if (!selectedDispute || !decision) {
       setActionMessage({ type: 'error', text: 'Please select a decision' });
+      return;
+    }
+    if (!notes.trim() || notes.trim().length < 10) {
+      setActionMessage({ type: 'error', text: 'Admin notes must be at least 10 characters' });
       return;
     }
 
@@ -174,7 +204,7 @@ export default function AdminDisputesPage() {
         type: 'success',
         text: 'Dispute resolved successfully',
       });
-      toast.success('Dispute resolved successfully');
+      toast.success(result.verdict_label || 'Dispute resolved successfully');
 
       setTimeout(closeModal, 1500);
     } catch (err) {
@@ -190,9 +220,9 @@ export default function AdminDisputesPage() {
 
     return (
       <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-          <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
-            <h3 className="text-lg font-bold text-gray-900">Resolve Dispute</h3>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10">
+            <h3 className="text-xl font-bold text-gray-900">Resolve Dispute</h3>
           </div>
 
           <div className="p-6 space-y-6">
@@ -235,8 +265,33 @@ export default function AdminDisputesPage() {
                 </div>
               </div>
 
+              {(selectedDispute.dispute_queue || selectedDispute.recommended_resolution) && (
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-950">
+                  <p className="font-semibold">
+                    Route: {getDisputeQueueLabel(selectedDispute.dispute_queue || 'standard')}
+                  </p>
+                  {selectedDispute.recommended_resolution && (
+                    <p className="mt-1">
+                      Suggested: {getResolutionVerdictLabel(selectedDispute.recommended_resolution)}
+                    </p>
+                  )}
+                  {selectedDispute.recommended_reason && (
+                    <p className="mt-1 text-indigo-900">{selectedDispute.recommended_reason}</p>
+                  )}
+                  {selectedDispute.status === 'open' && selectedDispute.recommended_resolution && (
+                    <button
+                      type="button"
+                      onClick={applySuggestedDecision}
+                      className="mt-2 text-sm font-semibold text-indigo-700 underline"
+                    >
+                      Apply suggestion to decision form
+                    </button>
+                  )}
+                </div>
+              )}
+
               {(selectedDispute.submission_screening || 'cleared') === 'held' && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                   <strong>Triage queue:</strong> filed with minimal evidence (e.g. one photo and shorter narrative).
                   Review carefully before resolving.
                 </div>
@@ -275,11 +330,11 @@ export default function AdminDisputesPage() {
                 ) : modalEvidence.length === 0 ? (
                   <p className="text-sm text-gray-500">No structured evidence rows yet.</p>
                 ) : (
-                  <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+                  <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                     {modalEvidence.map((ev) => (
                       <div
                         key={ev.id}
-                        className="rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-800"
+                        className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-800"
                       >
                         <div className="flex justify-between gap-2 font-semibold text-gray-900">
                           <span>{ev.submission_type}</span>
@@ -452,19 +507,43 @@ export default function AdminDisputesPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
-          <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Evidence queue</span>
+          <span className="text-sm font-semibold text-gray-700">Evidence filing</span>
           {[
-            { id: 'cleared', label: 'Standard queue' },
-            { id: 'held', label: 'Triage (thin filing)' },
+            { id: 'cleared', label: 'Standard filing' },
+            { id: 'held', label: 'Thin filing (triage)' },
             { id: 'all', label: 'All filings' },
           ].map((q) => (
             <button
               key={q.id}
               type="button"
               onClick={() => setQueueFilter(q.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              className={`px-3 py-2 rounded-lg text-sm font-semibold transition ${
                 queueFilter === q.id
                   ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 pt-2">
+          <span className="text-sm font-semibold text-gray-700">Routing queue</span>
+          {[
+            { id: 'all', label: 'All routes' },
+            { id: 'priority', label: 'Priority' },
+            { id: 'triage', label: 'Triage' },
+            { id: 'auto_suggest', label: 'Suggested' },
+            { id: 'standard', label: 'Standard' },
+          ].map((q) => (
+            <button
+              key={q.id}
+              type="button"
+              onClick={() => setRouteQueueFilter(q.id)}
+              className={`px-3 py-2 rounded-lg text-sm font-semibold transition ${
+                routeQueueFilter === q.id
+                  ? 'bg-violet-600 text-white'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
@@ -499,10 +578,18 @@ export default function AdminDisputesPage() {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-gray-600">{dispute.reason}</p>
-                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                    <p className="text-base text-gray-800">{dispute.reason?.replace(/_/g, ' ')}</p>
+                    <p className="text-sm text-gray-600 mt-2 line-clamp-2 leading-relaxed">
                       {dispute.description || 'No description'}
                     </p>
+                    {(dispute.dispute_queue || dispute.recommended_resolution) && (
+                      <p className="text-sm text-violet-700 font-medium mt-2">
+                        {getDisputeQueueLabel(dispute.dispute_queue || 'standard')}
+                        {dispute.recommended_resolution
+                          ? ` · ${getResolutionVerdictLabel(dispute.recommended_resolution)}`
+                          : ''}
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-3 mt-3">
                       <Link
                         href={`/dashboard/disputes/${dispute.id}`}
@@ -512,10 +599,10 @@ export default function AdminDisputesPage() {
                       </Link>
                       {dispute.transaction?.id && (
                         <Link
-                          href={`/dashboard/transactions/${dispute.transaction.id}`}
+                          href={`/dashboard/admin/transactions/${dispute.transaction.id}`}
                           className="text-sm font-semibold text-slate-600 hover:text-slate-900"
                         >
-                          View transaction →
+                          Audit transaction →
                         </Link>
                       )}
                     </div>
@@ -526,11 +613,19 @@ export default function AdminDisputesPage() {
                     )}
                   </div>
                   <button
-                    onClick={() => openModal(dispute)}
-                    disabled={dispute.status === 'resolved' || dispute.status === 'closed'}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() =>
+                      dispute.status === 'resolved' || dispute.status === 'closed'
+                        ? setViewOutcomeDispute(dispute)
+                        : openModal(dispute)
+                    }
+                    disabled={dispute.status === 'closed'}
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm transition disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {dispute.status === 'resolved' ? 'Resolved' : dispute.status === 'closed' ? 'Closed' : 'Review'}
+                    {dispute.status === 'resolved'
+                      ? 'View outcome'
+                      : dispute.status === 'closed'
+                        ? 'Closed'
+                        : 'Review'}
                   </button>
                 </div>
 
@@ -579,6 +674,36 @@ export default function AdminDisputesPage() {
       </div>
 
       {renderModal()}
+
+      {viewOutcomeDispute && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <div className="flex justify-between items-start mb-4">
+              <h3 className="text-xl font-bold text-slate-900">Resolved dispute outcome</h3>
+              <button
+                type="button"
+                onClick={() => setViewOutcomeDispute(null)}
+                className="text-sm font-semibold text-slate-600 hover:text-slate-900"
+              >
+                Close
+              </button>
+            </div>
+            <DisputeOutcomeCard
+              dispute={viewOutcomeDispute}
+              transaction={viewOutcomeDispute.transaction}
+              demoMode
+            />
+            {viewOutcomeDispute.transaction?.id && (
+              <Link
+                href={`/dashboard/admin/transactions/${viewOutcomeDispute.transaction.id}`}
+                className="inline-block mt-4 text-sm font-semibold text-blue-700"
+              >
+                Full transaction audit →
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

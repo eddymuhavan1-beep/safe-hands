@@ -348,12 +348,20 @@ export default function AdminTransactionsPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm">
-                      <button
-                        onClick={() => openModal(tx)}
-                        className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition font-medium text-xs"
-                      >
-                        Override
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={`/dashboard/admin/transactions/${tx.id}`}
+                          className="px-3 py-1.5 bg-slate-100 text-slate-800 rounded-lg hover:bg-slate-200 transition font-medium text-xs"
+                        >
+                          Audit
+                        </Link>
+                        <button
+                          onClick={() => openModal(tx)}
+                          className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition font-medium text-xs"
+                        >
+                          Override
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
